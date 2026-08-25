@@ -127,6 +127,28 @@
   .modal-actions { margin-top: 18px; display: flex; gap: 10px; }
   .modal-actions button { flex: 1; }
 
+  .perf-card {
+    margin: 12px 16px 0 16px; background: #161920; border: 1px solid #262a35;
+    border-radius: 12px; padding: 14px;
+  }
+  .perf-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .perf-title { font-size: 14.5px; font-weight: 700; color: #e8e9ec; }
+  .perf-sub { font-size: 11.5px; color: #7a8090; margin-top: 2px; }
+  .period-btns { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+  .period-btn {
+    background: #1e2128; color: #9aa0ac; border: 1px solid #2c313d;
+    font-size: 12px; padding: 6px 11px; border-radius: 999px; font-weight: 600;
+  }
+  .period-btn.active { background: #4f8cff; color: #fff; border-color: #4f8cff; }
+  .perf-chart-wrap { margin-top: 14px; }
+  .perf-summary {
+    margin-top: 10px; padding: 10px 12px; background: #10131c; border-radius: 10px;
+    border: 1px solid #1c2030; font-size: 12.5px; color: #cfd3da; line-height: 1.5;
+  }
+  .perf-summary b { color: #57d38c; }
+  .perf-summary .note { color: #7a8090; font-size: 11px; display: block; margin-top: 4px; }
+  .perf-close { margin-top: 12px; }
+
   .nfo-card {
     margin: 10px 16px; background: #161920; border: 1px solid #262a35;
     border-radius: 12px; padding: 14px; font-size: 13px; color: #9aa0ac; line-height: 1.5;
@@ -186,11 +208,37 @@
     <button class="btn-primary" id="saveBtn" style="flex:1">Add to Portfolio</button>
     <button class="btn-ghost" id="cancelBtn">Cancel</button>
   </div>
+  <div class="add-actions">
+    <button class="btn-ghost" id="perfBtnAdd" style="flex:1">View Performance ↓</button>
+  </div>
 </div>
 
 <h2>Your Portfolio</h2>
 <div id="holdingsList"></div>
 <div class="empty" id="holdingsEmpty">No investments added yet. Search above to add your first fund.</div>
+
+<div class="perf-card" id="perfCard" style="display:none">
+  <div class="perf-header">
+    <div>
+      <div class="perf-title" id="perfTitle">Fund Performance</div>
+      <div class="perf-sub" id="perfSub"></div>
+    </div>
+  </div>
+  <div class="period-btns">
+    <button class="period-btn" data-period="1">1Y</button>
+    <button class="period-btn" data-period="3">3Y</button>
+    <button class="period-btn" data-period="5">5Y</button>
+    <button class="period-btn" data-period="10">10Y</button>
+    <button class="period-btn active" data-period="all">Since Inception</button>
+  </div>
+  <div class="perf-chart-wrap" id="perfChartWrap">
+    <div class="status" style="padding:20px 0">Loading history...</div>
+  </div>
+  <div class="perf-summary" id="perfSummary"></div>
+  <div class="perf-close">
+    <button class="btn-ghost btn-small" id="perfCloseBtn">Close</button>
+  </div>
+</div>
 
 <h2>Upcoming Fund Offers (NFOs)</h2>
 <div class="nfo-card">
@@ -578,6 +626,7 @@
         "</div>" +
         "<div class=\"holding-actions\">" +
         "<button class=\"btn-ghost btn-small\" data-edit=\"" + escapeHtml(h.id) + "\">Edit</button>" +
+        "<button class=\"btn-ghost btn-small\" data-perf=\"" + escapeHtml(h.id) + "\">Performance</button>" +
         "<button class=\"btn-danger btn-small\" data-delete=\"" + escapeHtml(h.id) + "\">Delete</button>" +
         "</div>" +
         "</div>";
@@ -596,6 +645,15 @@
     for (i = 0; i < delBtns.length; i++) {
       delBtns[i].addEventListener("click", function (e) {
         openDeleteModal(e.target.getAttribute("data-delete"));
+      });
+    }
+    var perfBtns = holdingsList.querySelectorAll("[data-perf]");
+    for (i = 0; i < perfBtns.length; i++) {
+      perfBtns[i].addEventListener("click", function (e) {
+        var id = e.target.getAttribute("data-perf");
+        var h = null;
+        for (var j = 0; j < portfolio.length; j++) { if (portfolio[j].id === id) { h = portfolio[j]; break; } }
+        if (h) { showPerformance({ code: h.code, name: h.name }); }
       });
     }
   }
@@ -673,6 +731,216 @@
   nfoLink.addEventListener("click", function () {
     window.open(NFO_URL, "_blank", "noopener");
   });
+
+  // ---------- Fund performance (bar chart) ----------
+  var HIST_URL = "https://api.tigzig.com/mf/v1/nav?scheme=";
+  var historyCache = {};        // code -> sorted [{date, nav}]
+  var currentPerfCode = null;
+  var currentPerfName = "";
+  var currentPerfPeriod = "all";
+  var MS_PER_YEAR = 365.25 * 24 * 60 * 60 * 1000;
+
+  var perfCard = document.getElementById("perfCard");
+  var perfTitle = document.getElementById("perfTitle");
+  var perfSub = document.getElementById("perfSub");
+  var perfChartWrap = document.getElementById("perfChartWrap");
+  var perfSummary = document.getElementById("perfSummary");
+  var perfCloseBtn = document.getElementById("perfCloseBtn");
+  var perfBtnAdd = document.getElementById("perfBtnAdd");
+  var periodBtns = document.querySelectorAll(".period-btn");
+
+  function parseIsoDate(s) { return new Date(s + "T00:00:00Z"); }
+
+  function fetchHistory(code) {
+    if (historyCache[code]) { return Promise.resolve(historyCache[code]); }
+    return fetch(HIST_URL + encodeURIComponent(code), { cache: "no-store" })
+      .then(function (resp) {
+        if (!resp.ok) { throw new Error("HTTP " + resp.status); }
+        return resp.json();
+      })
+      .then(function (json) {
+        var data = (json && json.data) || [];
+        data = data.slice().sort(function (a, b) { return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+        historyCache[code] = data;
+        return data;
+      });
+  }
+
+  // Nearest point with date <= targetTime; falls back to the first point if
+  // the fund's history doesn't reach that far back (flags approx = true).
+  function findNearestOnOrBefore(history, targetTime) {
+    var best = null;
+    for (var i = 0; i < history.length; i++) {
+      var t = parseIsoDate(history[i].date).getTime();
+      if (t <= targetTime) { best = history[i]; } else { break; }
+    }
+    if (best) { return { point: best, approx: false }; }
+    return { point: history[0], approx: true };
+  }
+
+  function trailingReturn(history, years) {
+    if (history.length < 2) { return null; }
+    var last = history[history.length - 1];
+    var lastTime = parseIsoDate(last.date).getTime();
+    var targetTime = lastTime - years * MS_PER_YEAR;
+    var found = findNearestOnOrBefore(history, targetTime);
+    var startTime = parseIsoDate(found.point.date).getTime();
+    var elapsedYears = (lastTime - startTime) / MS_PER_YEAR;
+    if (elapsedYears <= 0 || found.point.nav <= 0) { return null; }
+    var isCagr = elapsedYears >= 0.95;
+    var pct = isCagr
+      ? (Math.pow(last.nav / found.point.nav, 1 / elapsedYears) - 1) * 100
+      : (last.nav / found.point.nav - 1) * 100;
+    return { pct: pct, isCagr: isCagr, elapsedYears: elapsedYears, approx: found.approx };
+  }
+
+  function yearlyBars(history, maxYears) {
+    if (history.length < 2) { return []; }
+    var byYear = {};
+    var order = [];
+    var i, y;
+    for (i = 0; i < history.length; i++) {
+      y = history[i].date.slice(0, 4);
+      if (!byYear[y]) { byYear[y] = { start: history[i], end: history[i] }; order.push(y); }
+      byYear[y].end = history[i];
+    }
+    var currentYear = String(new Date().getUTCFullYear());
+    var years = order.slice();
+    if (maxYears !== null && years.length > maxYears) { years = years.slice(years.length - maxYears); }
+    var bars = [];
+    for (i = 0; i < years.length; i++) {
+      y = years[i];
+      var startNav = byYear[y].start.nav;
+      var endNav = byYear[y].end.nav;
+      if (startNav <= 0) { continue; }
+      var pct = (endNav / startNav - 1) * 100;
+      bars.push({ label: y + (y === currentYear ? " (YTD)" : ""), value: pct });
+    }
+    return bars;
+  }
+
+  function buildBarChartSvg(bars) {
+    var W = 320, H = 180, padL = 8, padR = 8, padT = 16, padB = 30;
+    var plotW = W - padL - padR, plotH = H - padT - padB;
+    var i, maxVal = 0, minVal = 0;
+    for (i = 0; i < bars.length; i++) {
+      if (bars[i].value > maxVal) { maxVal = bars[i].value; }
+      if (bars[i].value < minVal) { minVal = bars[i].value; }
+    }
+    var range = maxVal - minVal;
+    if (range === 0) { range = Math.abs(maxVal) || 1; }
+    var maxP = maxVal + range * 0.2;
+    var minP = minVal - range * 0.2;
+    var rangeP = maxP - minP || 1;
+    function yFor(v) { return padT + plotH - ((v - minP) / rangeP) * plotH; }
+    var zeroY = yFor(0);
+    var barW = plotW / bars.length;
+    var svg = "<svg viewBox=\"0 0 " + W + " " + H + "\" width=\"100%\" style=\"display:block\">";
+    svg += "<line x1=\"" + padL + "\" y1=\"" + zeroY.toFixed(1) + "\" x2=\"" + (W - padR) + "\" y2=\"" + zeroY.toFixed(1) + "\" stroke=\"#2c313d\" stroke-width=\"1\"/>";
+    for (i = 0; i < bars.length; i++) {
+      var b = bars[i];
+      var x = padL + i * barW + barW * 0.18;
+      var w = barW * 0.64;
+      var y1 = yFor(Math.max(0, b.value));
+      var y2 = yFor(Math.min(0, b.value));
+      var h = Math.max(1, y2 - y1);
+      var color = b.value >= 0 ? "#57d38c" : "#ff6b6b";
+      svg += "<rect x=\"" + x.toFixed(1) + "\" y=\"" + y1.toFixed(1) + "\" width=\"" + w.toFixed(1) + "\" height=\"" + h.toFixed(1) + "\" rx=\"3\" fill=\"" + color + "\"/>";
+      var labelY = b.value >= 0 ? (y1 - 4) : (y2 + 12);
+      svg += "<text x=\"" + (x + w / 2).toFixed(1) + "\" y=\"" + labelY.toFixed(1) + "\" font-size=\"9\" fill=\"#cfd3da\" text-anchor=\"middle\">" +
+        (b.value >= 0 ? "+" : "") + b.value.toFixed(1) + "%</text>";
+      svg += "<text x=\"" + (x + w / 2).toFixed(1) + "\" y=\"" + (H - 8) + "\" font-size=\"9\" fill=\"#8b93a3\" text-anchor=\"middle\">" +
+        escapeHtml(b.label) + "</text>";
+    }
+    svg += "</svg>";
+    return svg;
+  }
+
+  function renderPerfSummary(history) {
+    var lines = [];
+    var since = trailingReturn(history, (parseIsoDate(history[history.length - 1].date).getTime() -
+      parseIsoDate(history[0].date).getTime()) / MS_PER_YEAR);
+    if (since) {
+      lines.push("Since inception (" + fmtDate(history[0].date) + "): <b>" +
+        (since.pct >= 0 ? "+" : "") + since.pct.toFixed(1) + "%" + (since.isCagr ? " CAGR" : "") + "</b>");
+    }
+    if (currentPerfPeriod !== "all") {
+      var yrs = parseInt(currentPerfPeriod, 10);
+      var tr = trailingReturn(history, yrs);
+      if (tr) {
+        lines.unshift(currentPerfPeriod + "Y" + (tr.isCagr ? " CAGR" : " return") + ": <b>" +
+          (tr.pct >= 0 ? "+" : "") + tr.pct.toFixed(1) + "%</b>" +
+          (tr.approx ? "<span class=\"note\">Fund history is shorter than " + currentPerfPeriod + " years — using data since inception instead.</span>" : ""));
+      }
+    }
+    return lines.join("<br>");
+  }
+
+  function renderPerfChart() {
+    var history = historyCache[currentPerfCode];
+    if (!history) { return; }
+    if (history.length < 2) {
+      perfChartWrap.innerHTML = "<div class=\"status\">Not enough NAV history yet to chart performance.</div>";
+      perfSummary.innerHTML = "";
+      return;
+    }
+    var bars;
+    if (currentPerfPeriod === "1") {
+      var tr1 = trailingReturn(history, 1);
+      bars = tr1 ? [{ label: "Last 12 Months", value: tr1.pct }] : [];
+      if (bars.length === 0) { bars = yearlyBars(history, null); }
+    } else if (currentPerfPeriod === "all") {
+      bars = yearlyBars(history, null);
+    } else {
+      bars = yearlyBars(history, parseInt(currentPerfPeriod, 10));
+    }
+    perfChartWrap.innerHTML = bars.length > 0
+      ? buildBarChartSvg(bars)
+      : "<div class=\"status\">Not enough history for this period.</div>";
+    perfSummary.innerHTML = renderPerfSummary(history);
+  }
+
+  function showPerformance(fund) {
+    currentPerfCode = fund.code;
+    currentPerfName = fund.name;
+    currentPerfPeriod = "all";
+    for (var i = 0; i < periodBtns.length; i++) {
+      periodBtns[i].className = "period-btn" + (periodBtns[i].getAttribute("data-period") === "all" ? " active" : "");
+    }
+    perfTitle.textContent = fund.name;
+    perfSub.textContent = "Yearly returns, since inception";
+    perfChartWrap.innerHTML = "<div class=\"status\"><span class=\"spinner\"></span>Loading history...</div>";
+    perfSummary.innerHTML = "";
+    perfCard.style.display = "block";
+    perfCard.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    fetchHistory(fund.code).then(function () {
+      if (currentPerfCode === fund.code) { renderPerfChart(); }
+    }).catch(function (err) {
+      if (currentPerfCode === fund.code) {
+        perfChartWrap.innerHTML = "<div class=\"status error\">Couldn't load performance history: " + escapeHtml(err.message) + "</div>";
+      }
+    });
+  }
+
+  perfBtnAdd.addEventListener("click", function () {
+    if (!selectedRow) { return; }
+    showPerformance({ code: selectedRow.code, name: selectedRow.name });
+  });
+  perfCloseBtn.addEventListener("click", function () {
+    perfCard.style.display = "none";
+    currentPerfCode = null;
+  });
+  for (var pb = 0; pb < periodBtns.length; pb++) {
+    periodBtns[pb].addEventListener("click", function (e) {
+      var p = e.target.getAttribute("data-period");
+      currentPerfPeriod = p;
+      for (var i = 0; i < periodBtns.length; i++) {
+        periodBtns[i].className = "period-btn" + (periodBtns[i] === e.target ? " active" : "");
+      }
+      renderPerfChart();
+    });
+  }
 
   // ---------- Init ----------
   portfolio = loadPortfolio();
