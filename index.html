@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Mutual Fund NAV Downloader</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f1115;
+    color: #e8e9ec;
+    padding-bottom: 40px;
+  }
+  header {
+    padding: 18px 16px 14px 16px;
+    background: linear-gradient(135deg, #1b1f2a, #12141a);
+    border-bottom: 1px solid #262a35;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  h1 {
+    margin: 0 0 4px 0;
+    font-size: 19px;
+    font-weight: 700;
+  }
+  .sub {
+    margin: 0;
+    font-size: 12.5px;
+    color: #9aa0ac;
+  }
+  .bar {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  input[type="text"] {
+    flex: 1;
+    font-size: 16px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid #2c313d;
+    background: #181b23;
+    color: #e8e9ec;
+    outline: none;
+  }
+  input[type="text"]:focus { border-color: #4f8cff; }
+  button {
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-primary { background: #4f8cff; color: #fff; }
+  .btn-primary:disabled { background: #2c3444; color: #6c7280; }
+  .btn-ghost { background: #1e2128; color: #cfd3da; border: 1px solid #2c313d; }
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .status {
+    padding: 10px 16px;
+    font-size: 13px;
+    color: #9aa0ac;
+  }
+  .status.error { color: #ff6b6b; }
+  .status.ok { color: #57d38c; }
+  select {
+    font-size: 14px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    border: 1px solid #2c313d;
+    background: #181b23;
+    color: #e8e9ec;
+  }
+  .count-pill {
+    display: inline-block;
+    background: #1e2128;
+    border: 1px solid #2c313d;
+    color: #9aa0ac;
+    font-size: 12px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    margin-left: 6px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  thead th {
+    position: sticky;
+    top: 118px;
+    background: #12141a;
+    text-align: left;
+    padding: 8px 10px;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #7a8090;
+    border-bottom: 1px solid #262a35;
+  }
+  tbody td {
+    padding: 9px 10px;
+    border-bottom: 1px solid #1b1e26;
+    vertical-align: top;
+  }
+  tbody tr:active { background: #171a21; }
+  .scheme-name { color: #e8e9ec; }
+  .fund-house { color: #7a8090; font-size: 11.5px; margin-top: 2px; }
+  .nav-val { font-weight: 700; color: #57d38c; white-space: nowrap; }
+  .code { color: #5c6270; font-size: 11px; }
+  .empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: #6c7280;
+    font-size: 14px;
+  }
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid #2c313d;
+    border-top-color: #4f8cff;
+    border-radius: 50%;
+    display: inline-block;
+    vertical-align: middle;
+    margin-right: 6px;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Mutual Fund NAV Downloader</h1>
+  <p class="sub" id="asOf">Live NAV data published by AMFI (India), all schemes.</p>
+  <div class="bar">
+    <input type="text" id="searchBox" placeholder="Search scheme name, AMC, or code..." disabled>
+    <select id="amcFilter" disabled>
+      <option value="">All AMCs</option>
+    </select>
+  </div>
+  <div class="actions">
+    <button class="btn-primary" id="loadBtn">Fetch Latest NAVs</button>
+    <button class="btn-ghost" id="csvBtn" disabled>Download CSV</button>
+    <span class="count-pill" id="countPill" style="display:none"></span>
+  </div>
+</header>
+
+<div class="status" id="status">Tap "Fetch Latest NAVs" to load current data from AMFI.</div>
+
+<table id="navTable" style="display:none">
+  <thead>
+    <tr>
+      <th>Scheme</th>
+      <th style="text-align:right">NAV (₹)</th>
+    </tr>
+  </thead>
+  <tbody id="navBody"></tbody>
+</table>
+
+<div class="empty" id="emptyMsg" style="display:none">No schemes match your search.</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var AMFI_URL = "https://www.amfiindia.com/spages/NAVAll.txt";
+  // AMFI doesn't send CORS headers, so the browser can't fetch it directly.
+  // This app is a single static page (no serverless function), so it routes
+  // the request through public CORS proxies, trying each until one works.
+  var PROXIES = [
+    function (url) { return "https://corsproxy.io/?url=" + encodeURIComponent(url); },
+    function (url) { return "https://api.allorigins.win/raw?url=" + encodeURIComponent(url); },
+    function (url) { return "https://r.jina.ai/" + url; }
+  ];
+
+  var allRows = [];      // {code, isin1, isin2, name, nav, date, amc}
+  var amcSet = [];
+  var searchBox = document.getElementById("searchBox");
+  var amcFilter = document.getElementById("amcFilter");
+  var loadBtn = document.getElementById("loadBtn");
+  var csvBtn = document.getElementById("csvBtn");
+  var statusEl = document.getElementById("status");
+  var tableEl = document.getElementById("navTable");
+  var bodyEl = document.getElementById("navBody");
+  var emptyMsg = document.getElementById("emptyMsg");
+  var countPill = document.getElementById("countPill");
+  var asOfEl = document.getElementById("asOf");
+
+  function setStatus(msg, cls) {
+    statusEl.className = "status" + (cls ? " " + cls : "");
+    statusEl.innerHTML = msg;
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  // Parses AMFI's semicolon-delimited NAVAll.txt format.
+  // Lines look like:
+  // Scheme Code;ISIN Div Payout/ISIN Growth;ISIN Div Reinvestment;Scheme Name;Net Asset Value;Date
+  // Fund house names appear on their own line as a section header (no semicolons, or all-caps text).
+  function parseAmfiText(text) {
+    var lines = text.split(/\r?\n/);
+    var rows = [];
+    var amcs = {};
+    var currentAmc = "";
+    var i, line, parts;
+
+    for (i = 0; i < lines.length; i++) {
+      line = lines[i].replace(/^\uFEFF/, "").trim();
+      if (line.length === 0) { continue; }
+
+      if (line.indexOf(";") === -1) {
+        // Section header lines are fund house names, e.g. "Axis Mutual Fund"
+        // Skip known non-data header lines.
+        if (line.toLowerCase().indexOf("scheme code") !== -1) { continue; }
+        if (line.toLowerCase().indexOf("open ended") !== -1 ||
+            line.toLowerCase().indexOf("close ended") !== -1 ||
+            line.toLowerCase().indexOf("interval fund") !== -1) {
+          // Scheme-type sub-header, keep previous AMC name.
+          continue;
+        }
+        currentAmc = line;
+        continue;
+      }
+
+      parts = line.split(";");
+      if (parts.length < 6) { continue; }
+
+      var code = parts[0].trim();
+      var isinGrowth = parts[1].trim();
+      var isinReinvest = parts[2].trim();
+      var name = parts[3].trim();
+      var navStr = parts[4].trim();
+      var date = parts[5].trim();
+
+      if (!code || !name || navStr === "" || navStr.toUpperCase() === "N.A.") { continue; }
+      var navNum = parseFloat(navStr);
+      if (isNaN(navNum)) { continue; }
+
+      rows.push({
+        code: code,
+        isin1: isinGrowth,
+        isin2: isinReinvest,
+        name: name,
+        nav: navNum,
+        date: date,
+        amc: currentAmc || "Unknown"
+      });
+      amcs[currentAmc || "Unknown"] = true;
+    }
+    return { rows: rows, amcs: Object.keys(amcs).sort() };
+  }
+
+  function fetchViaProxies(idx) {
+    if (idx >= PROXIES.length) {
+      return Promise.reject(new Error("All data sources failed. Your network may be blocking AMFI or the proxy services."));
+    }
+    var url = PROXIES[idx](AMFI_URL);
+    return fetch(url, { cache: "no-store" }).then(function (resp) {
+      if (!resp.ok) { throw new Error("HTTP " + resp.status); }
+      return resp.text();
+    }).then(function (text) {
+      if (!text || text.length < 500 || text.indexOf(";") === -1) {
+        throw new Error("Unexpected response");
+      }
+      return text;
+    }).catch(function (err) {
+      return fetchViaProxies(idx + 1);
+    });
+  }
+
+  function renderTable(rows) {
+    if (rows.length === 0) {
+      tableEl.style.display = "none";
+      emptyMsg.style.display = "block";
+      return;
+    }
+    emptyMsg.style.display = "none";
+    tableEl.style.display = "table";
+
+    var html = "";
+    var max = Math.min(rows.length, 2000); // render cap for smooth scrolling; download still exports all
+    for (var i = 0; i < max; i++) {
+      var r = rows[i];
+      html += "<tr>" +
+        "<td><div class=\"scheme-name\">" + escapeHtml(r.name) + "</div>" +
+        "<div class=\"fund-house\">" + escapeHtml(r.amc) + " &middot; <span class=\"code\">Code " + escapeHtml(r.code) + "</span></div></td>" +
+        "<td class=\"nav-val\" style=\"text-align:right\">" + r.nav.toFixed(4) + "</td>" +
+        "</tr>";
+    }
+    bodyEl.innerHTML = html;
+    if (rows.length > max) {
+      countPill.textContent = rows.length + " matches (showing first " + max + ")";
+    } else {
+      countPill.textContent = rows.length + " schemes";
+    }
+    countPill.style.display = "inline-block";
+  }
+
+  function applyFilters() {
+    var q = searchBox.value.trim().toLowerCase();
+    var amc = amcFilter.value;
+    var filtered = allRows.filter(function (r) {
+      if (amc && r.amc !== amc) { return false; }
+      if (!q) { return true; }
+      return r.name.toLowerCase().indexOf(q) !== -1 ||
+             r.amc.toLowerCase().indexOf(q) !== -1 ||
+             r.code.indexOf(q) !== -1;
+    });
+    renderTable(filtered);
+  }
+
+  function toCsvValue(v) {
+    var s = String(v == null ? "" : v);
+    if (s.indexOf(",") !== -1 || s.indexOf("\"") !== -1 || s.indexOf("\n") !== -1) {
+      s = "\"" + s.replace(/"/g, "\"\"") + "\"";
+    }
+    return s;
+  }
+
+  function downloadCsv() {
+    var q = searchBox.value.trim().toLowerCase();
+    var amc = amcFilter.value;
+    var rows = allRows.filter(function (r) {
+      if (amc && r.amc !== amc) { return false; }
+      if (!q) { return true; }
+      return r.name.toLowerCase().indexOf(q) !== -1 ||
+             r.amc.toLowerCase().indexOf(q) !== -1 ||
+             r.code.indexOf(q) !== -1;
+    });
+
+    var header = ["Scheme Code", "Scheme Name", "Fund House", "NAV", "Date", "ISIN Growth/Payout", "ISIN Reinvestment"];
+    var lines = [header.join(",")];
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      lines.push([
+        toCsvValue(r.code),
+        toCsvValue(r.name),
+        toCsvValue(r.amc),
+        toCsvValue(r.nav.toFixed(4)),
+        toCsvValue(r.date),
+        toCsvValue(r.isin1),
+        toCsvValue(r.isin2)
+      ].join(","));
+    }
+    var csvText = lines.join("\n");
+    var blob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    var stamp = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = "mutual_fund_nav_" + stamp + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  function populateAmcFilter(amcs) {
+    var html = "<option value=\"\">All AMCs (" + amcs.length + ")</option>";
+    for (var i = 0; i < amcs.length; i++) {
+      html += "<option value=\"" + escapeHtml(amcs[i]) + "\">" + escapeHtml(amcs[i]) + "</option>";
+    }
+    amcFilter.innerHTML = html;
+  }
+
+  function loadData() {
+    loadBtn.disabled = true;
+    loadBtn.innerHTML = "<span class=\"spinner\"></span>Fetching...";
+    setStatus("Fetching latest NAV data from AMFI, this can take a few seconds...");
+    tableEl.style.display = "none";
+    emptyMsg.style.display = "none";
+    countPill.style.display = "none";
+
+    fetchViaProxies(0).then(function (text) {
+      var parsed = parseAmfiText(text);
+      if (parsed.rows.length === 0) {
+        throw new Error("Could not parse any scheme rows from the response.");
+      }
+      allRows = parsed.rows;
+      amcSet = parsed.amcs;
+      populateAmcFilter(amcSet);
+      searchBox.disabled = false;
+      amcFilter.disabled = false;
+      csvBtn.disabled = false;
+
+      var latestDate = allRows[0] ? allRows[0].date : "";
+      asOfEl.textContent = allRows.length + " schemes across " + amcSet.length + " fund houses \u00b7 as of " + latestDate;
+      setStatus("Loaded successfully.", "ok");
+      applyFilters();
+    }).catch(function (err) {
+      setStatus("Couldn't load NAV data: " + err.message + ". Try again, or check your connection.", "error");
+    }).then(function () {
+      loadBtn.disabled = false;
+      loadBtn.textContent = "Refresh NAVs";
+    });
+  }
+
+  loadBtn.addEventListener("click", loadData);
+  csvBtn.addEventListener("click", downloadCsv);
+  searchBox.addEventListener("input", applyFilters);
+  amcFilter.addEventListener("change", applyFilters);
+})();
+</script>
+</body>
+</html>
