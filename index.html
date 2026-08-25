@@ -64,7 +64,20 @@
     gap: 8px;
     margin-top: 10px;
     flex-wrap: wrap;
+    align-items: center;
   }
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #cfd3da;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid #2c313d;
+    background: #181b23;
+  }
+  .toggle input { width: 16px; height: 16px; }
   .status {
     padding: 10px 16px;
     font-size: 13px;
@@ -88,7 +101,6 @@
     font-size: 12px;
     padding: 3px 9px;
     border-radius: 999px;
-    margin-left: 6px;
   }
   table {
     width: 100%;
@@ -97,7 +109,7 @@
   }
   thead th {
     position: sticky;
-    top: 118px;
+    top: 152px;
     background: #12141a;
     text-align: left;
     padding: 8px 10px;
@@ -140,7 +152,7 @@
 
 <header>
   <h1>Mutual Fund NAV Downloader</h1>
-  <p class="sub" id="asOf">Live NAV data published by AMFI (India), all schemes.</p>
+  <p class="sub" id="asOf">Current NAV for every Indian mutual fund scheme, sourced from AMFI.</p>
   <div class="bar">
     <input type="text" id="searchBox" placeholder="Search scheme name, AMC, or code..." disabled>
     <select id="amcFilter" disabled>
@@ -150,11 +162,12 @@
   <div class="actions">
     <button class="btn-primary" id="loadBtn">Fetch Latest NAVs</button>
     <button class="btn-ghost" id="csvBtn" disabled>Download CSV</button>
+    <label class="toggle"><input type="checkbox" id="activeOnly" checked>Active schemes only</label>
     <span class="count-pill" id="countPill" style="display:none"></span>
   </div>
 </header>
 
-<div class="status" id="status">Tap "Fetch Latest NAVs" to load current data from AMFI.</div>
+<div class="status" id="status">Tap "Fetch Latest NAVs" to load current data.</div>
 
 <table id="navTable" style="display:none">
   <thead>
@@ -172,22 +185,18 @@
 (function () {
   "use strict";
 
-  var AMFI_URL = "https://www.amfiindia.com/spages/NAVAll.txt";
-  // AMFI doesn't send CORS headers, so the browser can't fetch it directly.
-  // This app is a single static page (no serverless function), so it routes
-  // the request through public CORS proxies, trying each until one works.
-  var PROXIES = [
-    function (url) { return "https://corsproxy.io/?url=" + encodeURIComponent(url); },
-    function (url) { return "https://api.allorigins.win/raw?url=" + encodeURIComponent(url); },
-    function (url) { return "https://r.jina.ai/" + url; }
-  ];
+  // Open, no-auth data API that republishes AMFI's daily NAV filings as clean,
+  // browser-fetchable CSV. One row per scheme, always the latest published NAV.
+  // No CORS proxy needed - this endpoint is served with CORS enabled.
+  var DATA_URL = "https://api.tigzig.com/mf/v1/download?format=latest";
 
-  var allRows = [];      // {code, isin1, isin2, name, nav, date, amc}
+  var allRows = [];      // {code, isin1, isin2, name, amc, nav, date, active}
   var amcSet = [];
   var searchBox = document.getElementById("searchBox");
   var amcFilter = document.getElementById("amcFilter");
   var loadBtn = document.getElementById("loadBtn");
   var csvBtn = document.getElementById("csvBtn");
+  var activeOnly = document.getElementById("activeOnly");
   var statusEl = document.getElementById("status");
   var tableEl = document.getElementById("navTable");
   var bodyEl = document.getElementById("navBody");
@@ -207,79 +216,85 @@
       .replace(/>/g, "&gt;");
   }
 
-  // Parses AMFI's semicolon-delimited NAVAll.txt format.
-  // Lines look like:
-  // Scheme Code;ISIN Div Payout/ISIN Growth;ISIN Div Reinvestment;Scheme Name;Net Asset Value;Date
-  // Fund house names appear on their own line as a section header (no semicolons, or all-caps text).
-  function parseAmfiText(text) {
-    var lines = text.split(/\r?\n/);
+  // Proper CSV parser: handles quoted fields with embedded commas/quotes/newlines,
+  // since scheme names sometimes contain commas.
+  function parseCsv(text) {
+    var rows = [];
+    var row = [];
+    var field = "";
+    var inQuotes = false;
+    var i, c, next;
+
+    for (i = 0; i < text.length; i++) {
+      c = text.charAt(i);
+      if (inQuotes) {
+        if (c === "\"") {
+          next = text.charAt(i + 1);
+          if (next === "\"") { field += "\""; i++; }
+          else { inQuotes = false; }
+        } else {
+          field += c;
+        }
+      } else {
+        if (c === "\"") {
+          inQuotes = true;
+        } else if (c === ",") {
+          row.push(field); field = "";
+        } else if (c === "\n") {
+          row.push(field); field = "";
+          rows.push(row); row = [];
+        } else if (c === "\r") {
+          // skip, \n handles the row break
+        } else {
+          field += c;
+        }
+      }
+    }
+    if (field.length > 0 || row.length > 0) {
+      row.push(field);
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  function buildRows(csvRows) {
+    if (csvRows.length < 2) { return { rows: [], amcs: [] }; }
+    var header = csvRows[0];
+    var idx = {};
+    var i;
+    for (i = 0; i < header.length; i++) { idx[header[i].trim()] = i; }
+
+    var need = ["scheme_code", "isin", "isin2", "scheme_name", "amc", "nav_date", "nav", "is_active"];
+    for (i = 0; i < need.length; i++) {
+      if (!(need[i] in idx)) { throw new Error("Unexpected data format (missing " + need[i] + ")"); }
+    }
+
     var rows = [];
     var amcs = {};
-    var currentAmc = "";
-    var i, line, parts;
-
-    for (i = 0; i < lines.length; i++) {
-      line = lines[i].replace(/^\uFEFF/, "").trim();
-      if (line.length === 0) { continue; }
-
-      if (line.indexOf(";") === -1) {
-        // Section header lines are fund house names, e.g. "Axis Mutual Fund"
-        // Skip known non-data header lines.
-        if (line.toLowerCase().indexOf("scheme code") !== -1) { continue; }
-        if (line.toLowerCase().indexOf("open ended") !== -1 ||
-            line.toLowerCase().indexOf("close ended") !== -1 ||
-            line.toLowerCase().indexOf("interval fund") !== -1) {
-          // Scheme-type sub-header, keep previous AMC name.
-          continue;
-        }
-        currentAmc = line;
-        continue;
-      }
-
-      parts = line.split(";");
-      if (parts.length < 6) { continue; }
-
-      var code = parts[0].trim();
-      var isinGrowth = parts[1].trim();
-      var isinReinvest = parts[2].trim();
-      var name = parts[3].trim();
-      var navStr = parts[4].trim();
-      var date = parts[5].trim();
-
-      if (!code || !name || navStr === "" || navStr.toUpperCase() === "N.A.") { continue; }
+    for (i = 1; i < csvRows.length; i++) {
+      var r = csvRows[i];
+      if (r.length < header.length) { continue; }
+      var name = (r[idx.scheme_name] || "").trim();
+      var code = (r[idx.scheme_code] || "").trim();
+      var navStr = (r[idx.nav] || "").trim();
+      if (!name || !code || navStr === "") { continue; }
       var navNum = parseFloat(navStr);
       if (isNaN(navNum)) { continue; }
+      var amc = (r[idx.amc] || "Unknown").trim() || "Unknown";
 
       rows.push({
         code: code,
-        isin1: isinGrowth,
-        isin2: isinReinvest,
+        isin1: (r[idx.isin] || "").trim(),
+        isin2: (r[idx.isin2] || "").trim(),
         name: name,
+        amc: amc,
         nav: navNum,
-        date: date,
-        amc: currentAmc || "Unknown"
+        date: (r[idx.nav_date] || "").trim(),
+        active: (r[idx.is_active] || "").trim().toLowerCase() === "true"
       });
-      amcs[currentAmc || "Unknown"] = true;
+      amcs[amc] = true;
     }
     return { rows: rows, amcs: Object.keys(amcs).sort() };
-  }
-
-  function fetchViaProxies(idx) {
-    if (idx >= PROXIES.length) {
-      return Promise.reject(new Error("All data sources failed. Your network may be blocking AMFI or the proxy services."));
-    }
-    var url = PROXIES[idx](AMFI_URL);
-    return fetch(url, { cache: "no-store" }).then(function (resp) {
-      if (!resp.ok) { throw new Error("HTTP " + resp.status); }
-      return resp.text();
-    }).then(function (text) {
-      if (!text || text.length < 500 || text.indexOf(";") === -1) {
-        throw new Error("Unexpected response");
-      }
-      return text;
-    }).catch(function (err) {
-      return fetchViaProxies(idx + 1);
-    });
   }
 
   function renderTable(rows) {
@@ -292,7 +307,7 @@
     tableEl.style.display = "table";
 
     var html = "";
-    var max = Math.min(rows.length, 2000); // render cap for smooth scrolling; download still exports all
+    var max = Math.min(rows.length, 2000); // render cap for smooth scrolling; download still exports all matches
     for (var i = 0; i < max; i++) {
       var r = rows[i];
       html += "<tr>" +
@@ -310,17 +325,22 @@
     countPill.style.display = "inline-block";
   }
 
-  function applyFilters() {
+  function getFiltered() {
     var q = searchBox.value.trim().toLowerCase();
     var amc = amcFilter.value;
-    var filtered = allRows.filter(function (r) {
+    var onlyActive = activeOnly.checked;
+    return allRows.filter(function (r) {
+      if (onlyActive && !r.active) { return false; }
       if (amc && r.amc !== amc) { return false; }
       if (!q) { return true; }
       return r.name.toLowerCase().indexOf(q) !== -1 ||
              r.amc.toLowerCase().indexOf(q) !== -1 ||
              r.code.indexOf(q) !== -1;
     });
-    renderTable(filtered);
+  }
+
+  function applyFilters() {
+    renderTable(getFiltered());
   }
 
   function toCsvValue(v) {
@@ -332,17 +352,8 @@
   }
 
   function downloadCsv() {
-    var q = searchBox.value.trim().toLowerCase();
-    var amc = amcFilter.value;
-    var rows = allRows.filter(function (r) {
-      if (amc && r.amc !== amc) { return false; }
-      if (!q) { return true; }
-      return r.name.toLowerCase().indexOf(q) !== -1 ||
-             r.amc.toLowerCase().indexOf(q) !== -1 ||
-             r.code.indexOf(q) !== -1;
-    });
-
-    var header = ["Scheme Code", "Scheme Name", "Fund House", "NAV", "Date", "ISIN Growth/Payout", "ISIN Reinvestment"];
+    var rows = getFiltered();
+    var header = ["Scheme Code", "Scheme Name", "Fund House", "NAV", "Date", "ISIN Growth/Payout", "ISIN Reinvestment", "Active"];
     var lines = [header.join(",")];
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
@@ -353,7 +364,8 @@
         toCsvValue(r.nav.toFixed(4)),
         toCsvValue(r.date),
         toCsvValue(r.isin1),
-        toCsvValue(r.isin2)
+        toCsvValue(r.isin2),
+        toCsvValue(r.active ? "Yes" : "No")
       ].join(","));
     }
     var csvText = lines.join("\n");
@@ -380,39 +392,53 @@
   function loadData() {
     loadBtn.disabled = true;
     loadBtn.innerHTML = "<span class=\"spinner\"></span>Fetching...";
-    setStatus("Fetching latest NAV data from AMFI, this can take a few seconds...");
+    setStatus("Fetching latest NAV data, this can take a few seconds...");
     tableEl.style.display = "none";
     emptyMsg.style.display = "none";
     countPill.style.display = "none";
 
-    fetchViaProxies(0).then(function (text) {
-      var parsed = parseAmfiText(text);
-      if (parsed.rows.length === 0) {
-        throw new Error("Could not parse any scheme rows from the response.");
-      }
-      allRows = parsed.rows;
-      amcSet = parsed.amcs;
-      populateAmcFilter(amcSet);
-      searchBox.disabled = false;
-      amcFilter.disabled = false;
-      csvBtn.disabled = false;
+    fetch(DATA_URL, { cache: "no-store" })
+      .then(function (resp) {
+        if (!resp.ok) { throw new Error("HTTP " + resp.status); }
+        return resp.text();
+      })
+      .then(function (text) {
+        var csvRows = parseCsv(text);
+        var built = buildRows(csvRows);
+        if (built.rows.length === 0) {
+          throw new Error("Could not parse any scheme rows from the response.");
+        }
+        allRows = built.rows;
+        amcSet = built.amcs;
+        populateAmcFilter(amcSet);
+        searchBox.disabled = false;
+        amcFilter.disabled = false;
+        csvBtn.disabled = false;
 
-      var latestDate = allRows[0] ? allRows[0].date : "";
-      asOfEl.textContent = allRows.length + " schemes across " + amcSet.length + " fund houses \u00b7 as of " + latestDate;
-      setStatus("Loaded successfully.", "ok");
-      applyFilters();
-    }).catch(function (err) {
-      setStatus("Couldn't load NAV data: " + err.message + ". Try again, or check your connection.", "error");
-    }).then(function () {
-      loadBtn.disabled = false;
-      loadBtn.textContent = "Refresh NAVs";
-    });
+        var activeCount = allRows.filter(function (r) { return r.active; }).length;
+        var latestDate = "";
+        for (var i = 0; i < allRows.length; i++) {
+          if (allRows[i].date && allRows[i].date > latestDate) { latestDate = allRows[i].date; }
+        }
+        asOfEl.textContent = activeCount + " active schemes (" + allRows.length + " total incl. matured) across " +
+          amcSet.length + " AMCs \u00b7 latest NAV date " + latestDate;
+        setStatus("Loaded successfully.", "ok");
+        applyFilters();
+      })
+      .catch(function (err) {
+        setStatus("Couldn't load NAV data: " + err.message + ". Try again, or check your connection.", "error");
+      })
+      .then(function () {
+        loadBtn.disabled = false;
+        loadBtn.textContent = "Refresh NAVs";
+      });
   }
 
   loadBtn.addEventListener("click", loadData);
   csvBtn.addEventListener("click", downloadCsv);
   searchBox.addEventListener("input", applyFilters);
   amcFilter.addEventListener("change", applyFilters);
+  activeOnly.addEventListener("change", applyFilters);
 })();
 </script>
 </body>
