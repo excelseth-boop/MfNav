@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Mutual Fund NAV Downloader</title>
+<title>Mutual Fund Portfolio Tracker</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body {
@@ -11,138 +11,130 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: #0f1115;
     color: #e8e9ec;
-    padding-bottom: 40px;
+    padding-bottom: 50px;
   }
   header {
     padding: 18px 16px 14px 16px;
     background: linear-gradient(135deg, #1b1f2a, #12141a);
     border-bottom: 1px solid #262a35;
-    position: sticky;
-    top: 0;
-    z-index: 10;
   }
-  h1 {
-    margin: 0 0 4px 0;
-    font-size: 19px;
-    font-weight: 700;
-  }
-  .sub {
-    margin: 0;
-    font-size: 12.5px;
-    color: #9aa0ac;
-  }
-  .bar {
-    display: flex;
-    gap: 8px;
-    margin-top: 12px;
-  }
-  input[type="text"] {
-    flex: 1;
-    font-size: 16px;
-    padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid #2c313d;
-    background: #181b23;
-    color: #e8e9ec;
-    outline: none;
-  }
-  input[type="text"]:focus { border-color: #4f8cff; }
+  h1 { margin: 0 0 4px 0; font-size: 19px; font-weight: 700; }
+  h2 { font-size: 15px; margin: 26px 16px 10px 16px; color: #cfd3da; }
+  .sub { margin: 0; font-size: 12.5px; color: #9aa0ac; }
+  .status { padding: 10px 16px; font-size: 13px; color: #9aa0ac; }
+  .status.error { color: #ff6b6b; }
+  .status.ok { color: #57d38c; }
+
   button {
-    font-size: 14px;
-    font-weight: 600;
-    padding: 10px 14px;
-    border-radius: 10px;
-    border: none;
-    cursor: pointer;
-    white-space: nowrap;
+    font-size: 14px; font-weight: 600; padding: 10px 14px;
+    border-radius: 10px; border: none; cursor: pointer; white-space: nowrap;
   }
   .btn-primary { background: #4f8cff; color: #fff; }
   .btn-primary:disabled { background: #2c3444; color: #6c7280; }
   .btn-ghost { background: #1e2128; color: #cfd3da; border: 1px solid #2c313d; }
-  .actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 10px;
-    flex-wrap: wrap;
-    align-items: center;
+  .btn-danger { background: #3a1e22; color: #ff8a8a; border: 1px solid #5a2a30; }
+  .btn-small { font-size: 12.5px; padding: 7px 10px; border-radius: 8px; }
+
+  /* Summary card */
+  .summary {
+    margin: 14px 16px 0 16px;
+    background: linear-gradient(135deg, #172033, #10131c);
+    border: 1px solid #263049;
+    border-radius: 14px;
+    padding: 16px;
   }
-  .toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: #cfd3da;
-    padding: 8px 10px;
-    border-radius: 10px;
-    border: 1px solid #2c313d;
-    background: #181b23;
+  .summary .label { font-size: 12px; color: #8ea0c7; text-transform: uppercase; letter-spacing: 0.04em; }
+  .summary .value { font-size: 28px; font-weight: 800; color: #fff; margin-top: 4px; }
+  .summary .meta { font-size: 12px; color: #7a8ba8; margin-top: 6px; }
+
+  /* Search / picker */
+  .picker-wrap { margin: 0 16px; position: relative; }
+  input[type="text"], input[type="number"], input[type="date"] {
+    width: 100%; font-size: 16px; padding: 11px 12px;
+    border-radius: 10px; border: 1px solid #2c313d;
+    background: #181b23; color: #e8e9ec; outline: none;
   }
-  .toggle input { width: 16px; height: 16px; }
-  .status {
-    padding: 10px 16px;
-    font-size: 13px;
-    color: #9aa0ac;
+  input:focus { border-color: #4f8cff; }
+  label.field-label { display: block; font-size: 12px; color: #9aa0ac; margin: 12px 0 6px 0; }
+  .dropdown {
+    position: absolute; left: 0; right: 0; top: calc(100% + 4px);
+    background: #161920; border: 1px solid #2c313d; border-radius: 10px;
+    max-height: 320px; overflow-y: auto; z-index: 20;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
   }
-  .status.error { color: #ff6b6b; }
-  .status.ok { color: #57d38c; }
-  select {
-    font-size: 14px;
-    padding: 9px 10px;
-    border-radius: 10px;
-    border: 1px solid #2c313d;
-    background: #181b23;
-    color: #e8e9ec;
+  .dropdown-item { padding: 10px 12px; border-bottom: 1px solid #1e2128; cursor: pointer; }
+  .dropdown-item:last-child { border-bottom: none; }
+  .dropdown-item:active { background: #1e2230; }
+  .dd-name { font-size: 13.5px; color: #e8e9ec; }
+  .dd-meta { font-size: 11.5px; color: #7a8090; margin-top: 2px; }
+  .dd-nav { float: right; color: #57d38c; font-weight: 700; font-size: 12.5px; }
+  .dd-empty { padding: 14px 12px; font-size: 13px; color: #6c7280; }
+
+  /* Selected fund / add card */
+  .add-card {
+    margin: 12px 16px 0 16px; background: #161920; border: 1px solid #262a35;
+    border-radius: 12px; padding: 14px;
   }
-  .count-pill {
-    display: inline-block;
-    background: #1e2128;
-    border: 1px solid #2c313d;
-    color: #9aa0ac;
-    font-size: 12px;
-    padding: 3px 9px;
-    border-radius: 999px;
+  .add-card .fund-title { font-size: 14.5px; font-weight: 700; color: #e8e9ec; }
+  .add-card .fund-sub { font-size: 12px; color: #8b93a3; margin-top: 3px; }
+  .tag {
+    display: inline-block; background: #1e2438; color: #8ea0c7; font-size: 10.5px;
+    padding: 2px 7px; border-radius: 999px; margin-top: 6px; margin-right: 5px;
   }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13.5px;
+  .tag.warn { background: #33261a; color: #e0a85c; }
+  .tag.muted { background: #20232b; color: #7a8090; }
+  .row-2 { display: flex; gap: 10px; }
+  .row-2 > div { flex: 1; }
+  .live-value {
+    margin-top: 12px; padding: 10px 12px; background: #10131c; border-radius: 10px;
+    border: 1px solid #1c2030; display: flex; justify-content: space-between; align-items: center;
   }
-  thead th {
-    position: sticky;
-    top: 152px;
-    background: #12141a;
-    text-align: left;
-    padding: 8px 10px;
-    font-size: 11.5px;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    color: #7a8090;
-    border-bottom: 1px solid #262a35;
+  .live-value .lbl { font-size: 12px; color: #8ea0c7; }
+  .live-value .val { font-size: 17px; font-weight: 800; color: #57d38c; }
+  .add-actions { margin-top: 12px; display: flex; gap: 8px; }
+
+  /* Portfolio table */
+  .holding-card {
+    margin: 10px 16px; background: #161920; border: 1px solid #262a35;
+    border-radius: 12px; padding: 13px;
   }
-  tbody td {
-    padding: 9px 10px;
-    border-bottom: 1px solid #1b1e26;
-    vertical-align: top;
+  .holding-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+  .holding-name { font-size: 14px; font-weight: 700; color: #e8e9ec; }
+  .holding-sub { font-size: 11.5px; color: #7a8090; margin-top: 2px; }
+  .holding-grid {
+    margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px;
+    font-size: 12.5px;
   }
-  tbody tr:active { background: #171a21; }
-  .scheme-name { color: #e8e9ec; }
-  .fund-house { color: #7a8090; font-size: 11.5px; margin-top: 2px; }
-  .nav-val { font-weight: 700; color: #57d38c; white-space: nowrap; }
-  .code { color: #5c6270; font-size: 11px; }
-  .empty {
-    padding: 40px 20px;
-    text-align: center;
-    color: #6c7280;
-    font-size: 14px;
+  .holding-grid .k { color: #7a8090; }
+  .holding-grid .v { color: #dfe2e8; font-weight: 600; }
+  .holding-value { color: #57d38c; }
+  .holding-actions { margin-top: 12px; display: flex; gap: 8px; }
+  .empty { padding: 30px 20px; text-align: center; color: #6c7280; font-size: 13.5px; }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px;
   }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: #1a1d24; border: 1px solid #2c313d; border-radius: 14px;
+    padding: 20px; max-width: 340px; width: 100%; text-align: center;
+  }
+  .modal-warn-icon { font-size: 34px; margin-bottom: 8px; }
+  .modal-title { font-size: 16px; font-weight: 700; color: #fff; }
+  .modal-text { font-size: 13px; color: #9aa0ac; margin-top: 8px; line-height: 1.5; }
+  .modal-actions { margin-top: 18px; display: flex; gap: 10px; }
+  .modal-actions button { flex: 1; }
+
+  .nfo-card {
+    margin: 10px 16px; background: #161920; border: 1px solid #262a35;
+    border-radius: 12px; padding: 14px; font-size: 13px; color: #9aa0ac; line-height: 1.5;
+  }
+
   .spinner {
-    width: 16px; height: 16px;
-    border: 2px solid #2c313d;
-    border-top-color: #4f8cff;
-    border-radius: 50%;
-    display: inline-block;
-    vertical-align: middle;
-    margin-right: 6px;
+    width: 16px; height: 16px; border: 2px solid #2c313d; border-top-color: #4f8cff;
+    border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 6px;
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -151,126 +143,183 @@
 <body>
 
 <header>
-  <h1>Mutual Fund NAV Downloader</h1>
-  <p class="sub" id="asOf">Current NAV for every Indian mutual fund scheme, sourced from AMFI.</p>
-  <div class="bar">
-    <input type="text" id="searchBox" placeholder="Search scheme name, AMC, or code..." disabled>
-    <select id="amcFilter" disabled>
-      <option value="">All AMCs</option>
-    </select>
-  </div>
-  <div class="actions">
-    <button class="btn-primary" id="loadBtn">Fetch Latest NAVs</button>
-    <button class="btn-ghost" id="csvBtn" disabled>Download CSV</button>
-    <label class="toggle"><input type="checkbox" id="activeOnly" checked>Active schemes only</label>
-    <span class="count-pill" id="countPill" style="display:none"></span>
-  </div>
+  <h1>Mutual Fund Portfolio Tracker</h1>
+  <p class="sub" id="asOf">Live NAV data sourced from AMFI (India).</p>
 </header>
 
-<div class="status" id="status">Tap "Fetch Latest NAVs" to load current data.</div>
+<div class="status" id="status">Loading current fund data...</div>
 
-<table id="navTable" style="display:none">
-  <thead>
-    <tr>
-      <th>Scheme</th>
-      <th style="text-align:right">NAV (₹)</th>
-    </tr>
-  </thead>
-  <tbody id="navBody"></tbody>
-</table>
+<div class="summary" id="summaryCard" style="display:none">
+  <div class="label">Total Current Value</div>
+  <div class="value" id="totalValue">₹0</div>
+  <div class="meta" id="totalMeta">0 holdings</div>
+</div>
 
-<div class="empty" id="emptyMsg" style="display:none">No schemes match your search.</div>
+<h2>Add an Investment</h2>
+<div class="picker-wrap">
+  <input type="text" id="searchBox" placeholder="Type fund name, e.g. Axis, ICICI, HDFC..." disabled>
+  <div class="dropdown" id="dropdown" style="display:none"></div>
+</div>
+
+<div class="add-card" id="addCard" style="display:none">
+  <div class="fund-title" id="selName"></div>
+  <div class="fund-sub" id="selAmc"></div>
+  <div id="selTags"></div>
+
+  <div class="row-2">
+    <div>
+      <label class="field-label">Units Invested</label>
+      <input type="number" id="unitsInput" placeholder="e.g. 152.345" step="0.001" min="0">
+    </div>
+    <div>
+      <label class="field-label">Purchase Date</label>
+      <input type="date" id="dateInput">
+    </div>
+  </div>
+
+  <div class="live-value">
+    <span class="lbl">Value at current NAV</span>
+    <span class="val" id="liveValue">₹0.00</span>
+  </div>
+
+  <div class="add-actions">
+    <button class="btn-primary" id="saveBtn" style="flex:1">Add to Portfolio</button>
+    <button class="btn-ghost" id="cancelBtn">Cancel</button>
+  </div>
+</div>
+
+<h2>Your Portfolio</h2>
+<div id="holdingsList"></div>
+<div class="empty" id="holdingsEmpty">No investments added yet. Search above to add your first fund.</div>
+
+<h2>Upcoming Fund Offers (NFOs)</h2>
+<div class="nfo-card">
+  There isn't a reliable, freely accessible data feed for upcoming New Fund Offers, so this app can't list them automatically without risking stale or wrong info.
+  <div style="margin-top:10px">
+    <button class="btn-ghost" id="nfoLink">View Live NFOs on AMFI ↗</button>
+  </div>
+</div>
+
+<h2>Browse Full Fund List</h2>
+<div class="nfo-card" style="display:flex; align-items:center; justify-content:space-between; gap:10px">
+  <span id="browseCount">Fund data not loaded yet.</span>
+  <button class="btn-ghost btn-small" id="csvBtn" disabled>Download CSV</button>
+</div>
+
+<!-- Delete confirmation modal -->
+<div class="modal-overlay" id="deleteModal">
+  <div class="modal-box">
+    <div class="modal-warn-icon">⚠️</div>
+    <div class="modal-title">Delete this investment?</div>
+    <div class="modal-text" id="deleteModalText">This will permanently remove the holding from your portfolio. This cannot be undone.</div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="deleteCancelBtn">Cancel</button>
+      <button class="btn-danger" id="deleteConfirmBtn">Delete</button>
+    </div>
+  </div>
+</div>
 
 <script>
 (function () {
   "use strict";
 
-  // Open, no-auth data API that republishes AMFI's daily NAV filings as clean,
-  // browser-fetchable CSV. One row per scheme, always the latest published NAV.
-  // No CORS proxy needed - this endpoint is served with CORS enabled.
   var DATA_URL = "https://api.tigzig.com/mf/v1/download?format=latest";
+  var STORAGE_KEY = "mfnav_portfolio_v1";
+  var NFO_URL = "https://www.mutualfundssahihai.com/en/node/177";
 
-  var allRows = [];      // {code, isin1, isin2, name, amc, nav, date, active}
-  var amcSet = [];
+  var allRows = [];        // every scheme, full dataset (incl. matured)
+  var rowByCode = {};       // code -> row
+  var activeRowsSorted = []; // active schemes, sorted by name, for the picker
+  var portfolio = [];       // saved holdings
+  var selectedRow = null;   // currently picked fund (not yet saved)
+  var editingId = null;     // id of holding being edited, or null when adding new
+  var pendingDeleteId = null;
+
   var searchBox = document.getElementById("searchBox");
-  var amcFilter = document.getElementById("amcFilter");
-  var loadBtn = document.getElementById("loadBtn");
-  var csvBtn = document.getElementById("csvBtn");
-  var activeOnly = document.getElementById("activeOnly");
+  var dropdown = document.getElementById("dropdown");
+  var addCard = document.getElementById("addCard");
+  var selName = document.getElementById("selName");
+  var selAmc = document.getElementById("selAmc");
+  var selTags = document.getElementById("selTags");
+  var unitsInput = document.getElementById("unitsInput");
+  var dateInput = document.getElementById("dateInput");
+  var liveValue = document.getElementById("liveValue");
+  var saveBtn = document.getElementById("saveBtn");
+  var cancelBtn = document.getElementById("cancelBtn");
+  var holdingsList = document.getElementById("holdingsList");
+  var holdingsEmpty = document.getElementById("holdingsEmpty");
+  var summaryCard = document.getElementById("summaryCard");
+  var totalValue = document.getElementById("totalValue");
+  var totalMeta = document.getElementById("totalMeta");
   var statusEl = document.getElementById("status");
-  var tableEl = document.getElementById("navTable");
-  var bodyEl = document.getElementById("navBody");
-  var emptyMsg = document.getElementById("emptyMsg");
-  var countPill = document.getElementById("countPill");
   var asOfEl = document.getElementById("asOf");
+  var csvBtn = document.getElementById("csvBtn");
+  var browseCount = document.getElementById("browseCount");
+  var deleteModal = document.getElementById("deleteModal");
+  var deleteCancelBtn = document.getElementById("deleteCancelBtn");
+  var deleteConfirmBtn = document.getElementById("deleteConfirmBtn");
+  var nfoLink = document.getElementById("nfoLink");
 
   function setStatus(msg, cls) {
     statusEl.className = "status" + (cls ? " " + cls : "");
     statusEl.innerHTML = msg;
   }
-
   function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function fmtMoney(n) {
+    if (isNaN(n)) { n = 0; }
+    return "₹" + n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function todayIso() {
+    var d = new Date();
+    var m = ("0" + (d.getMonth() + 1)).slice(-2);
+    var day = ("0" + d.getDate()).slice(-2);
+    return d.getFullYear() + "-" + m + "-" + day;
+  }
+  function fmtDate(iso) {
+    if (!iso) { return "-"; }
+    var p = iso.split("-");
+    if (p.length !== 3) { return iso; }
+    var months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    var mi = parseInt(p[1], 10) - 1;
+    return p[2] + " " + (months[mi] || p[1]) + " " + p[0];
   }
 
-  // Proper CSV parser: handles quoted fields with embedded commas/quotes/newlines,
-  // since scheme names sometimes contain commas.
+  // ---------- CSV parsing ----------
   function parseCsv(text) {
-    var rows = [];
-    var row = [];
-    var field = "";
-    var inQuotes = false;
-    var i, c, next;
-
+    var rows = []; var row = []; var field = ""; var inQuotes = false; var i, c, next;
     for (i = 0; i < text.length; i++) {
       c = text.charAt(i);
       if (inQuotes) {
         if (c === "\"") {
           next = text.charAt(i + 1);
-          if (next === "\"") { field += "\""; i++; }
-          else { inQuotes = false; }
-        } else {
-          field += c;
-        }
+          if (next === "\"") { field += "\""; i++; } else { inQuotes = false; }
+        } else { field += c; }
       } else {
-        if (c === "\"") {
-          inQuotes = true;
-        } else if (c === ",") {
-          row.push(field); field = "";
-        } else if (c === "\n") {
-          row.push(field); field = "";
-          rows.push(row); row = [];
-        } else if (c === "\r") {
-          // skip, \n handles the row break
-        } else {
-          field += c;
-        }
+        if (c === "\"") { inQuotes = true; }
+        else if (c === ",") { row.push(field); field = ""; }
+        else if (c === "\n") { row.push(field); field = ""; rows.push(row); row = []; }
+        else if (c === "\r") { /* skip */ }
+        else { field += c; }
       }
     }
-    if (field.length > 0 || row.length > 0) {
-      row.push(field);
-      rows.push(row);
-    }
+    if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
     return rows;
   }
 
   function buildRows(csvRows) {
-    if (csvRows.length < 2) { return { rows: [], amcs: [] }; }
+    if (csvRows.length < 2) { return []; }
     var header = csvRows[0];
     var idx = {};
     var i;
     for (i = 0; i < header.length; i++) { idx[header[i].trim()] = i; }
-
-    var need = ["scheme_code", "isin", "isin2", "scheme_name", "amc", "nav_date", "nav", "is_active"];
+    var need = ["scheme_code","isin","isin2","scheme_name","amc","scheme_type","category_sub",
+      "category_group_clean","first_date","nav_date","nav","is_active"];
     for (i = 0; i < need.length; i++) {
       if (!(need[i] in idx)) { throw new Error("Unexpected data format (missing " + need[i] + ")"); }
     }
-
     var rows = [];
-    var amcs = {};
     for (i = 1; i < csvRows.length; i++) {
       var r = csvRows[i];
       if (r.length < header.length) { continue; }
@@ -280,123 +329,41 @@
       if (!name || !code || navStr === "") { continue; }
       var navNum = parseFloat(navStr);
       if (isNaN(navNum)) { continue; }
-      var amc = (r[idx.amc] || "Unknown").trim() || "Unknown";
-
       rows.push({
         code: code,
         isin1: (r[idx.isin] || "").trim(),
         isin2: (r[idx.isin2] || "").trim(),
         name: name,
-        amc: amc,
+        amc: (r[idx.amc] || "Unknown").trim() || "Unknown",
+        schemeType: (r[idx.scheme_type] || "").trim(),
+        categorySub: (r[idx.category_sub] || "").trim(),
+        categoryGroup: (r[idx.category_group_clean] || "").trim(),
+        firstDate: (r[idx.first_date] || "").trim(),
         nav: navNum,
-        date: (r[idx.nav_date] || "").trim(),
+        navDate: (r[idx.nav_date] || "").trim(),
         active: (r[idx.is_active] || "").trim().toLowerCase() === "true"
       });
-      amcs[amc] = true;
     }
-    return { rows: rows, amcs: Object.keys(amcs).sort() };
+    return rows;
   }
 
-  function renderTable(rows) {
-    if (rows.length === 0) {
-      tableEl.style.display = "none";
-      emptyMsg.style.display = "block";
-      return;
-    }
-    emptyMsg.style.display = "none";
-    tableEl.style.display = "table";
-
-    var html = "";
-    var max = Math.min(rows.length, 2000); // render cap for smooth scrolling; download still exports all matches
-    for (var i = 0; i < max; i++) {
-      var r = rows[i];
-      html += "<tr>" +
-        "<td><div class=\"scheme-name\">" + escapeHtml(r.name) + "</div>" +
-        "<div class=\"fund-house\">" + escapeHtml(r.amc) + " &middot; <span class=\"code\">Code " + escapeHtml(r.code) + "</span></div></td>" +
-        "<td class=\"nav-val\" style=\"text-align:right\">" + r.nav.toFixed(4) + "</td>" +
-        "</tr>";
-    }
-    bodyEl.innerHTML = html;
-    if (rows.length > max) {
-      countPill.textContent = rows.length + " matches (showing first " + max + ")";
-    } else {
-      countPill.textContent = rows.length + " schemes";
-    }
-    countPill.style.display = "inline-block";
+  function fundTypeLabel(r) {
+    if (r.categoryGroup && r.categorySub) { return r.categoryGroup + " · " + r.categorySub; }
+    return r.categoryGroup || r.categorySub || r.schemeType || "Type not specified";
   }
 
-  function getFiltered() {
-    var q = searchBox.value.trim().toLowerCase();
-    var amc = amcFilter.value;
-    var onlyActive = activeOnly.checked;
-    return allRows.filter(function (r) {
-      if (onlyActive && !r.active) { return false; }
-      if (amc && r.amc !== amc) { return false; }
-      if (!q) { return true; }
-      return r.name.toLowerCase().indexOf(q) !== -1 ||
-             r.amc.toLowerCase().indexOf(q) !== -1 ||
-             r.code.indexOf(q) !== -1;
-    });
-  }
-
-  function applyFilters() {
-    renderTable(getFiltered());
-  }
-
-  function toCsvValue(v) {
-    var s = String(v == null ? "" : v);
-    if (s.indexOf(",") !== -1 || s.indexOf("\"") !== -1 || s.indexOf("\n") !== -1) {
-      s = "\"" + s.replace(/"/g, "\"\"") + "\"";
+  function maturityLabel(r) {
+    var t = (r.schemeType || "").toLowerCase();
+    if (t.indexOf("open") !== -1) { return { text: "Open-ended · no maturity date", warn: false }; }
+    if (t.indexOf("close") !== -1 || t.indexOf("interval") !== -1) {
+      return { text: "Maturity date not published by AMFI for this scheme", warn: true };
     }
-    return s;
+    return { text: "Maturity date not available", warn: true };
   }
 
-  function downloadCsv() {
-    var rows = getFiltered();
-    var header = ["Scheme Code", "Scheme Name", "Fund House", "NAV", "Date", "ISIN Growth/Payout", "ISIN Reinvestment", "Active"];
-    var lines = [header.join(",")];
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i];
-      lines.push([
-        toCsvValue(r.code),
-        toCsvValue(r.name),
-        toCsvValue(r.amc),
-        toCsvValue(r.nav.toFixed(4)),
-        toCsvValue(r.date),
-        toCsvValue(r.isin1),
-        toCsvValue(r.isin2),
-        toCsvValue(r.active ? "Yes" : "No")
-      ].join(","));
-    }
-    var csvText = lines.join("\n");
-    var blob = new Blob([csvText], { type: "text/csv;charset=utf-8;" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    var stamp = new Date().toISOString().slice(0, 10);
-    a.href = url;
-    a.download = "mutual_fund_nav_" + stamp + ".csv";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
-  }
-
-  function populateAmcFilter(amcs) {
-    var html = "<option value=\"\">All AMCs (" + amcs.length + ")</option>";
-    for (var i = 0; i < amcs.length; i++) {
-      html += "<option value=\"" + escapeHtml(amcs[i]) + "\">" + escapeHtml(amcs[i]) + "</option>";
-    }
-    amcFilter.innerHTML = html;
-  }
-
+  // ---------- Data load ----------
   function loadData() {
-    loadBtn.disabled = true;
-    loadBtn.innerHTML = "<span class=\"spinner\"></span>Fetching...";
-    setStatus("Fetching latest NAV data, this can take a few seconds...");
-    tableEl.style.display = "none";
-    emptyMsg.style.display = "none";
-    countPill.style.display = "none";
-
+    setStatus("<span class=\"spinner\"></span>Fetching latest NAV data...");
     fetch(DATA_URL, { cache: "no-store" })
       .then(function (resp) {
         if (!resp.ok) { throw new Error("HTTP " + resp.status); }
@@ -404,41 +371,313 @@
       })
       .then(function (text) {
         var csvRows = parseCsv(text);
-        var built = buildRows(csvRows);
-        if (built.rows.length === 0) {
-          throw new Error("Could not parse any scheme rows from the response.");
-        }
-        allRows = built.rows;
-        amcSet = built.amcs;
-        populateAmcFilter(amcSet);
-        searchBox.disabled = false;
-        amcFilter.disabled = false;
-        csvBtn.disabled = false;
+        var rows = buildRows(csvRows);
+        if (rows.length === 0) { throw new Error("Could not parse any scheme rows from the response."); }
+        allRows = rows;
+        rowByCode = {};
+        var i;
+        for (i = 0; i < allRows.length; i++) { rowByCode[allRows[i].code] = allRows[i]; }
+        activeRowsSorted = allRows.filter(function (r) { return r.active; })
+          .sort(function (a, b) { return a.name.localeCompare(b.name); });
 
-        var activeCount = allRows.filter(function (r) { return r.active; }).length;
         var latestDate = "";
-        for (var i = 0; i < allRows.length; i++) {
-          if (allRows[i].date && allRows[i].date > latestDate) { latestDate = allRows[i].date; }
+        for (i = 0; i < allRows.length; i++) {
+          if (allRows[i].navDate && allRows[i].navDate > latestDate) { latestDate = allRows[i].navDate; }
         }
-        asOfEl.textContent = activeCount + " active schemes (" + allRows.length + " total incl. matured) across " +
-          amcSet.length + " AMCs \u00b7 latest NAV date " + latestDate;
-        setStatus("Loaded successfully.", "ok");
-        applyFilters();
+        asOfEl.textContent = activeRowsSorted.length + " active schemes · latest NAV date " + latestDate;
+        browseCount.textContent = allRows.length + " total schemes available (" + activeRowsSorted.length + " active)";
+        setStatus("Data loaded.", "ok");
+        searchBox.disabled = false;
+        csvBtn.disabled = false;
+        renderPortfolio(); // refresh live values now that NAVs are available
       })
       .catch(function (err) {
-        setStatus("Couldn't load NAV data: " + err.message + ". Try again, or check your connection.", "error");
-      })
-      .then(function () {
-        loadBtn.disabled = false;
-        loadBtn.textContent = "Refresh NAVs";
+        setStatus("Couldn't load NAV data: " + err.message + ". <button class=\"btn-ghost btn-small\" id=\"retryBtn\">Retry</button>", "error");
+        var retryBtn = document.getElementById("retryBtn");
+        if (retryBtn) { retryBtn.addEventListener("click", loadData); }
       });
   }
 
-  loadBtn.addEventListener("click", loadData);
-  csvBtn.addEventListener("click", downloadCsv);
-  searchBox.addEventListener("input", applyFilters);
-  amcFilter.addEventListener("change", applyFilters);
-  activeOnly.addEventListener("change", applyFilters);
+  // ---------- Search / picker ----------
+  function renderDropdown(query) {
+    var q = query.trim().toLowerCase();
+    if (!q) { dropdown.style.display = "none"; dropdown.innerHTML = ""; return; }
+    var matches = activeRowsSorted.filter(function (r) {
+      return r.name.toLowerCase().indexOf(q) === 0;
+    });
+    if (matches.length === 0) {
+      // fall back to "contains" so a mid-name search (e.g. AMC-less fragments) still works
+      matches = activeRowsSorted.filter(function (r) { return r.name.toLowerCase().indexOf(q) !== -1; });
+    }
+    matches = matches.slice(0, 40);
+
+    if (matches.length === 0) {
+      dropdown.innerHTML = "<div class=\"dd-empty\">No matching funds.</div>";
+    } else {
+      var html = "";
+      for (var i = 0; i < matches.length; i++) {
+        var r = matches[i];
+        html += "<div class=\"dropdown-item\" data-code=\"" + escapeHtml(r.code) + "\">" +
+          "<span class=\"dd-nav\">₹" + r.nav.toFixed(2) + "</span>" +
+          "<div class=\"dd-name\">" + escapeHtml(r.name) + "</div>" +
+          "<div class=\"dd-meta\">" + escapeHtml(r.amc) + " · " + escapeHtml(fundTypeLabel(r)) + "</div>" +
+          "</div>";
+      }
+      dropdown.innerHTML = html;
+    }
+    dropdown.style.display = "block";
+  }
+
+  searchBox.addEventListener("input", function () { renderDropdown(searchBox.value); });
+  searchBox.addEventListener("focus", function () { if (searchBox.value.trim()) { renderDropdown(searchBox.value); } });
+
+  dropdown.addEventListener("click", function (e) {
+    var item = e.target.closest ? e.target.closest(".dropdown-item") : null;
+    if (!item) { return; }
+    var code = item.getAttribute("data-code");
+    var row = rowByCode[code];
+    if (!row) { return; }
+    selectFund(row);
+  });
+
+  document.addEventListener("click", function (e) {
+    if (e.target !== searchBox && dropdown.style.display === "block" &&
+        (!e.target.closest || !e.target.closest(".dropdown"))) {
+      dropdown.style.display = "none";
+    }
+  });
+
+  function selectFund(row) {
+    selectedRow = row;
+    dropdown.style.display = "none";
+    searchBox.value = "";
+
+    selName.textContent = row.name;
+    selAmc.textContent = row.amc + " · Code " + row.code;
+    var mat = maturityLabel(row);
+    var tagsHtml = "<span class=\"tag\">" + escapeHtml(fundTypeLabel(row)) + "</span>" +
+      "<span class=\"tag muted\">Launched " + escapeHtml(fmtDate(row.firstDate)) + "</span>" +
+      "<span class=\"tag " + (mat.warn ? "warn" : "muted") + "\">" + escapeHtml(mat.text) + "</span>";
+    selTags.innerHTML = tagsHtml;
+
+    if (editingId === null) {
+      unitsInput.value = "";
+      dateInput.value = todayIso();
+    }
+    updateLiveValue();
+    addCard.style.display = "block";
+    addCard.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  function updateLiveValue() {
+    var units = parseFloat(unitsInput.value);
+    if (!selectedRow || isNaN(units) || units <= 0) {
+      liveValue.textContent = "₹0.00";
+      return;
+    }
+    liveValue.textContent = fmtMoney(units * selectedRow.nav);
+  }
+  unitsInput.addEventListener("input", updateLiveValue);
+
+  function resetAddCard() {
+    selectedRow = null;
+    editingId = null;
+    addCard.style.display = "none";
+    unitsInput.value = "";
+    saveBtn.textContent = "Add to Portfolio";
+  }
+  cancelBtn.addEventListener("click", resetAddCard);
+
+  saveBtn.addEventListener("click", function () {
+    if (!selectedRow) { return; }
+    var units = parseFloat(unitsInput.value);
+    if (isNaN(units) || units <= 0) {
+      unitsInput.focus();
+      setStatus("Enter a valid number of units before saving.", "error");
+      return;
+    }
+    var purchaseDate = dateInput.value || todayIso();
+
+    if (editingId !== null) {
+      for (var i = 0; i < portfolio.length; i++) {
+        if (portfolio[i].id === editingId) {
+          portfolio[i].units = units;
+          portfolio[i].purchaseDate = purchaseDate;
+          portfolio[i].code = selectedRow.code;
+          portfolio[i].name = selectedRow.name;
+          portfolio[i].amc = selectedRow.amc;
+          break;
+        }
+      }
+    } else {
+      portfolio.push({
+        id: "h_" + Date.now() + "_" + Math.floor(Math.random() * 10000),
+        code: selectedRow.code,
+        name: selectedRow.name,
+        amc: selectedRow.amc,
+        units: units,
+        purchaseDate: purchaseDate
+      });
+    }
+    savePortfolio();
+    resetAddCard();
+    renderPortfolio();
+    setStatus("Portfolio updated.", "ok");
+  });
+
+  // ---------- Portfolio persistence ----------
+  function loadPortfolio() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) { return []; }
+  }
+  function savePortfolio() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(portfolio)); } catch (e) {}
+  }
+
+  function renderPortfolio() {
+    if (portfolio.length === 0) {
+      holdingsList.innerHTML = "";
+      holdingsEmpty.style.display = "block";
+      summaryCard.style.display = "none";
+      return;
+    }
+    holdingsEmpty.style.display = "none";
+    summaryCard.style.display = "block";
+
+    var html = "";
+    var total = 0;
+    var i;
+    for (i = 0; i < portfolio.length; i++) {
+      var h = portfolio[i];
+      var live = rowByCode[h.code];
+      var nav = live ? live.nav : null;
+      var navDate = live ? live.navDate : null;
+      var value = nav !== null ? h.units * nav : null;
+      if (value !== null) { total += value; }
+      var typeLabel = live ? fundTypeLabel(live) : "Type unavailable";
+      var mat = live ? maturityLabel(live) : { text: "Maturity info unavailable", warn: true };
+      var launchLabel = live ? fmtDate(live.firstDate) : "-";
+
+      html += "<div class=\"holding-card\">" +
+        "<div class=\"holding-top\"><div>" +
+        "<div class=\"holding-name\">" + escapeHtml(h.name) + "</div>" +
+        "<div class=\"holding-sub\">" + escapeHtml(h.amc) + " · Code " + escapeHtml(h.code) + "</div>" +
+        "</div></div>" +
+        "<div>" +
+        "<span class=\"tag\">" + escapeHtml(typeLabel) + "</span>" +
+        "<span class=\"tag muted\">Launched " + escapeHtml(launchLabel) + "</span>" +
+        "<span class=\"tag " + (mat.warn ? "warn" : "muted") + "\">" + escapeHtml(mat.text) + "</span>" +
+        "</div>" +
+        "<div class=\"holding-grid\">" +
+        "<div><span class=\"k\">Units</span><br><span class=\"v\">" + h.units.toLocaleString("en-IN", {maximumFractionDigits:3}) + "</span></div>" +
+        "<div><span class=\"k\">Purchase Date</span><br><span class=\"v\">" + escapeHtml(fmtDate(h.purchaseDate)) + "</span></div>" +
+        "<div><span class=\"k\">Current NAV</span><br><span class=\"v\">" + (nav !== null ? "₹" + nav.toFixed(4) : "Data not loaded") + "</span></div>" +
+        "<div><span class=\"k\">Current Value</span><br><span class=\"v holding-value\">" + (value !== null ? fmtMoney(value) : "-") + "</span></div>" +
+        "</div>" +
+        "<div class=\"holding-actions\">" +
+        "<button class=\"btn-ghost btn-small\" data-edit=\"" + escapeHtml(h.id) + "\">Edit</button>" +
+        "<button class=\"btn-danger btn-small\" data-delete=\"" + escapeHtml(h.id) + "\">Delete</button>" +
+        "</div>" +
+        "</div>";
+    }
+    holdingsList.innerHTML = html;
+    totalValue.textContent = fmtMoney(total);
+    totalMeta.textContent = portfolio.length + " holding" + (portfolio.length === 1 ? "" : "s");
+
+    var editBtns = holdingsList.querySelectorAll("[data-edit]");
+    for (i = 0; i < editBtns.length; i++) {
+      editBtns[i].addEventListener("click", function (e) {
+        startEdit(e.target.getAttribute("data-edit"));
+      });
+    }
+    var delBtns = holdingsList.querySelectorAll("[data-delete]");
+    for (i = 0; i < delBtns.length; i++) {
+      delBtns[i].addEventListener("click", function (e) {
+        openDeleteModal(e.target.getAttribute("data-delete"));
+      });
+    }
+  }
+
+  function startEdit(id) {
+    var h = null;
+    for (var i = 0; i < portfolio.length; i++) { if (portfolio[i].id === id) { h = portfolio[i]; break; } }
+    if (!h) { return; }
+    var live = rowByCode[h.code];
+    if (!live) {
+      setStatus("Can't edit this holding until fund data has loaded. Tap Retry above if it failed.", "error");
+      return;
+    }
+    editingId = id;
+    selectFund(live);
+    unitsInput.value = h.units;
+    dateInput.value = h.purchaseDate;
+    updateLiveValue();
+    saveBtn.textContent = "Update Holding";
+  }
+
+  function openDeleteModal(id) {
+    var h = null;
+    for (var i = 0; i < portfolio.length; i++) { if (portfolio[i].id === id) { h = portfolio[i]; break; } }
+    if (!h) { return; }
+    pendingDeleteId = id;
+    document.getElementById("deleteModalText").textContent =
+      "Remove \"" + h.name + "\" (" + h.units + " units) from your portfolio? This cannot be undone.";
+    deleteModal.className = "modal-overlay open";
+  }
+  deleteCancelBtn.addEventListener("click", function () {
+    pendingDeleteId = null;
+    deleteModal.className = "modal-overlay";
+  });
+  deleteConfirmBtn.addEventListener("click", function () {
+    if (pendingDeleteId === null) { return; }
+    portfolio = portfolio.filter(function (h) { return h.id !== pendingDeleteId; });
+    savePortfolio();
+    pendingDeleteId = null;
+    deleteModal.className = "modal-overlay";
+    renderPortfolio();
+    setStatus("Holding deleted.", "ok");
+  });
+
+  // ---------- Full list CSV download ----------
+  function toCsvValue(v) {
+    var s = String(v == null ? "" : v);
+    if (s.indexOf(",") !== -1 || s.indexOf("\"") !== -1 || s.indexOf("\n") !== -1) {
+      s = "\"" + s.replace(/"/g, "\"\"") + "\"";
+    }
+    return s;
+  }
+  csvBtn.addEventListener("click", function () {
+    var header = ["Scheme Code","Scheme Name","Fund House","Type","Category","NAV","NAV Date","Launch Date","Active"];
+    var lines = [header.join(",")];
+    for (var i = 0; i < allRows.length; i++) {
+      var r = allRows[i];
+      lines.push([
+        toCsvValue(r.code), toCsvValue(r.name), toCsvValue(r.amc), toCsvValue(r.schemeType),
+        toCsvValue(fundTypeLabel(r)), toCsvValue(r.nav.toFixed(4)), toCsvValue(r.navDate),
+        toCsvValue(r.firstDate), toCsvValue(r.active ? "Yes" : "No")
+      ].join(","));
+    }
+    var blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "mutual_fund_nav_" + todayIso() + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  });
+
+  nfoLink.addEventListener("click", function () {
+    window.open(NFO_URL, "_blank", "noopener");
+  });
+
+  // ---------- Init ----------
+  portfolio = loadPortfolio();
+  renderPortfolio();
+  loadData();
 })();
 </script>
 </body>
